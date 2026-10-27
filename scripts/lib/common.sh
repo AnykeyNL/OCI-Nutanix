@@ -109,7 +109,13 @@ is_done()   { [ -f "$STATE_DIR/$NODE_NAME.$1.done" ]; }
 clear_done(){ rm -f "$STATE_DIR/$NODE_NAME.$1.done"; }
 
 # ---------- SSH helpers (CE default passwords, no host keys: the IPs are reused) ----------
-SSHO="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
+# Password only: ssh would otherwise offer every local key first, and AHV's
+# hardened sshd closes the connection after a few failures ("Too many
+# authentication failures") before sshpass ever sees the password prompt.
+SSHO="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10
+      -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive
+      -o NumberOfPasswordPrompts=1 -o GSSAPIAuthentication=no"
+SSHO=$(echo $SSHO)
 ssh_pw()  { sshpass -p "$CE_PASSWORD" ssh $SSHO "$@"; }
 # AHV has no SFTP server, so scp needs the legacy protocol (-O)
 scp_pw()  { sshpass -p "$CE_PASSWORD" scp -O $SSHO "$@"; }
@@ -123,18 +129,35 @@ scp_to_installer() { scp_pw "$@" "root@$IBFT_IP:/root/"; }
 scp_to_host()      { scp_pw "$@" "root@$HOST_IP:/root/"; }
 
 # wait_for <label> <timeout-seconds> <interval-seconds> <command...>
+# Shows the command's last error line every 4th attempt, so a stuck wait
+# explains itself (e.g. an ssh authentication problem vs. "connection refused").
 wait_for() {
-  local label=$1 timeout=$2 iv=$3 t=0
+  local label=$1 timeout=$2 iv=$3 t=0 n=0 err
   shift 3
-  until "$@" >/dev/null 2>&1; do
-    [ "$t" -ge "$timeout" ] && { echo; die "timed out after ${timeout}s waiting for $label"; }
+  until err=$("$@" 2>&1 >/dev/null); do
+    n=$((n + 1))
+    [ "$t" -ge "$timeout" ] && { echo; [ -n "$err" ] && echo "    last error: $(tail -1 <<< "$err")"; die "timed out after ${timeout}s waiting for $label"; }
+    [ $((n % 4)) -eq 0 ] && [ -n "$err" ] && printf '\n    last error: %s\n' "$(tail -1 <<< "$err")"
     sleep "$iv"; t=$((t + iv))
     printf '\r    ... waiting for %s (%dm%02ds) ' "$label" $((t / 60)) $((t % 60))
   done
   echo
   info "$label: ok"
 }
-ssh_ok() { ssh_pw -o BatchMode=no "$1" true; }
+# ssh_ok <user@host>: true when a password login works; explains why not on stderr
+ssh_ok() {
+  local out rc
+  out=$(ssh_pw "$1" true 2>&1); rc=$?
+  [ $rc -eq 0 ] && return 0
+  case $rc in
+    5)   echo "sshpass: password rejected for $1 (CE_PASSWORD in the config is '$CE_PASSWORD'; AHV also locks root for a while after repeated failures: see docs/TROUBLESHOOTING.md)" ;;
+    6)   echo "sshpass: host key problem for $1: $out" ;;
+    3|4) echo "sshpass: no password prompt from $1 - ssh said: ${out:-nothing}" ;;
+    255) echo "ssh $1: ${out:-connection failed}" ;;
+    *)   echo "ssh $1 exit $rc: $out" ;;
+  esac >&2
+  return $rc
+}
 
 # ---------- misc ----------
 # 10.0.0.0/24 -> 255.255.255.0
