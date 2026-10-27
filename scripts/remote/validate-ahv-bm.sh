@@ -46,6 +46,10 @@ chk "boot NIC not in OVS"                     "! ovs-vsctl show | grep -qi \"\$B
 chk "br0 MAC = eth0 MAC"                      "[ \"\$(cat /sys/class/net/br0/address)\" = \"\$(cat /sys/class/net/eth0/address)\" ]"
 chk "default route via br0"                   "ip route show default | grep -q 'dev br0'"
 chk "rule: from boot IP -> table 100"         "ip rule show | grep -q 'lookup 100'"
+BNIC=$(for n in /sys/class/net/*; do [ "$(cat $n/address 2>/dev/null)" = "$BMAC" ] && echo ${n##*/}; done | head -1)
+# the subnet must not be reachable via the boot NIC in the main table (replies
+# to same-subnet peers would leave through NIC0 and be dropped by OCI)
+chk "main table: subnet not via boot NIC $BNIC" "! ip -4 route show dev ${BNIC:-none} | grep -v '^169.254' | grep -q ."
 GW=$(ip route show default | awk '{print $3; exit}')
 chk "gateway $GW reachable"                   "ping -c2 -W2 $GW"
 chk "time synchronised"                       "chronyc tracking | grep -q 'Leap status *: Normal'"

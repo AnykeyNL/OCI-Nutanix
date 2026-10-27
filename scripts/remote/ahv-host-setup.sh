@@ -166,6 +166,14 @@ if [ -f /etc/oci-bm-boot-nic ]; then
     ip route replace 169.254.0.0/16 dev $BNIC table 100
     ip route replace default via $GW dev $BNIC table 100
     ip link show br0 >/dev/null 2>&1 && ip route replace default via $GW dev br0
+    # Same-subnet peers (an admin host in this subnet, for example): the main
+    # table also holds the subnet via the boot NIC, added by the initramfs and
+    # therefore older than br0's route, so it wins. Replies from the host IP
+    # would leave through NIC0 and be dropped by OCI (wrong VNIC for that IP).
+    # The boot NIC keeps the subnet route in table 100 only.
+    if [ -n "$BNET" ] && ip -4 route show "$BNET" dev "$BNIC" 2>/dev/null | grep -q .; then
+      ip route del "$BNET" dev "$BNIC" && logger -t oci-cvm-net "removed main-table route $BNET dev $BNIC (kept in table 100)"
+    fi
   fi
 fi
 # CVM traffic: plain Linux bridge, routed + proxy-ARP through the host
