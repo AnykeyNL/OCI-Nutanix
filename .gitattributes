@@ -1,0 +1,6 @@
+# the scripts run on Linux: always LF, also when checked out on Windows
+* text=auto eol=lf
+*.sh text eol=lf
+*.c text eol=lf
+*.md text eol=lf
+*.example text eol=lf

@@ -1,0 +1,20 @@
+# installation media and build output - never commit
+*.iso
+*.iso.part
+*.ko
+
+# source documents (internal)
+*.pdf
+
+# per-deployment configuration and state
+config/oci-nutanix.env
+state/
+*.iscsi
+*.log
+
+# editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
